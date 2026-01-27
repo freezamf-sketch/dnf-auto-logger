@@ -17,15 +17,16 @@ jobs:
       with:
         python-version: '3.9'
 
-    # [중요] 크롬 브라우저와 드라이버 자동 설치
-    - name: Setup Chrome & ChromeDriver
-      uses: browser-actions/setup-chrome@latest
-      with:
-        chrome-version: stable
-
-    - name: Install dependencies
+    # [중요] 시스템 패키지 설치 (크롬, xvfb)
+    - name: Install System Dependencies
       run: |
-        pip install selenium gspread google-auth webdriver-manager
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable xvfb
+
+    # [중요] 파이썬 패키지 설치 (pyvirtualdisplay 추가)
+    - name: Install Python Dependencies
+      run: |
+        pip install selenium gspread google-auth pyvirtualdisplay webdriver-manager
 
     - name: Run script
       env:
