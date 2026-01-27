@@ -76,10 +76,16 @@ def run():
     client = gspread.authorize(creds)
     
     try:
-        sh = client.open(SPREADSHEET_NAME).sheet1
-    except Exception as e:
-        print(f"시트 접속 에러: {e}")
-        return
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/1lKwU5aY6WGywhPRN1uIbCNjX8wQ7hcUNcGstgvoBeFI/edit?gid=0#gid=0" 
+
+try:
+    # URL로 열기
+    doc = client.open_by_url(SHEET_URL)
+    sh = doc.sheet1  # 첫 번째 탭 선택
+    print(f"시트 접속 성공: {doc.title}")
+except Exception as e:
+    print(f"❌ 시트 접속 실패! 공유 설정을 확인하세요. 에러: {e}")
+    return
     
     data = get_dnf_data()
     if data:
