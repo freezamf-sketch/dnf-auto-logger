@@ -2,9 +2,8 @@ name: DNF Crawler
 
 on:
   schedule:
-    # 3시간마다 실행 (UTC 기준이므로 한국시간 계산 필요하지만, 간격은 3시간 맞음)
     - cron: '0 */3 * * *'
-  workflow_dispatch: # 수동 실행 버튼
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,9 +17,15 @@ jobs:
       with:
         python-version: '3.9'
 
+    # [중요] 크롬 브라우저와 드라이버 자동 설치
+    - name: Setup Chrome & ChromeDriver
+      uses: browser-actions/setup-chrome@latest
+      with:
+        chrome-version: stable
+
     - name: Install dependencies
       run: |
-        pip install selenium gspread google-auth
+        pip install selenium gspread google-auth webdriver-manager
 
     - name: Run script
       env:
