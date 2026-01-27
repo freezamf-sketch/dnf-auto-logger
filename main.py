@@ -16,11 +16,9 @@ from pyvirtualdisplay import Display
 # ==========================================
 # 📋 [사용자 설정 영역] - 여기를 수정하세요
 # ==========================================
-# 구글 시트 전체 주소
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1lKwU5aY6WGywhPRN1uIbCNjX8wQ7hcUNcGstgvoBeFI/edit"
 
 # 수집할 아이템 4개 목록
-# sheet_name은 구글 시트 아래쪽 탭 이름과 똑같아야 합니다.
 ITEMS = [
     {
         "url": "http://dnfnow.xyz/item?item_idx=bfc7bb0aefe4d0c432ebf77836e68e3c", 
@@ -51,7 +49,7 @@ display.start()
 
 def get_dnf_data(target_url):
     """
-    사이트에 접속해서 이미지에 있는 '실제 거래된 가격' 표만 쏙 뽑아오는 함수
+    사이트에 접속해서 '실제 거래된 가격' 표의 숫자만 쏙 뽑아오는 함수
     """
     print(f"🔄 접속 시도: {target_url}")
     
@@ -62,7 +60,7 @@ def get_dnf_data(target_url):
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--disable-gpu")
     
-    # 매번 깨끗한 브라우저 새로 띄우기 (오류 방지)
+    # 매번 깨끗한 브라우저 새로 띄우기
     driver = webdriver.Chrome(options=chrome_options)
     
     try:
@@ -73,39 +71,42 @@ def get_dnf_data(target_url):
         row_24_xpath = "//td[contains(text(), '24시간내')]/parent::tr"
         wait.until(EC.presence_of_element_located((By.XPATH, row_24_xpath)))
         
-        # 페이지 로딩 후 3초 기다림 (데이터가 늦게 뜨는 것 방지)
-        time.sleep(3)
+        time.sleep(3) # 데이터 로딩 대기
 
-        # 숫자만 남기는 청소기 함수 (이 정규식이 핵심입니다!)
+        # ========================================================
+        # 🧹 [수정된 부분] 텍스트 청소기 함수
+        # 1. replace로 ' 와 << 를 먼저 강제로 지웁니다.
+        # 2. re.sub로 숫자(0-9)가 아닌 모든 것을 한번 더 지웁니다.
+        # ========================================================
         def clean_text(text):
-            return re.sub(r'[^\d]', '', text)
+            # 1단계: 찌꺼기 문자 제거
+            text = text.replace("'", "").replace("<<", "").replace(",", "")
+            # 2단계: 확실하게 숫자만 남기기 (공백 제거 포함)
+            return re.sub(r'[^0-9]', '', text).strip()
 
-        # 2. 24시간 데이터 추출 (물량, 총거래액, 평균)
+        # 2. 24시간 데이터 추출
         row_24_elem = driver.find_element(By.XPATH, row_24_xpath)
         cols_24 = row_24_elem.find_elements(By.TAG_NAME, "td")
-        # [0]은 '24시간내' 글자이므로 [1], [2], [3]만 가져옴
         data_24 = [clean_text(cols_24[i].text) for i in range(1, 4)]
 
-        # 3. 72시간 데이터 추출 (물량, 총거래액, 평균)
+        # 3. 72시간 데이터 추출
         row_72_xpath = "//td[contains(text(), '72시간내')]/parent::tr"
         row_72_elem = driver.find_element(By.XPATH, row_72_xpath)
         cols_72 = row_72_elem.find_elements(By.TAG_NAME, "td")
         data_72 = [clean_text(cols_72[i].text) for i in range(1, 4)]
         
-        # 데이터 6개 합쳐서 반환
         return data_24 + data_72
 
     except Exception as e:
         print(f"⚠️ 수집 실패 ({target_url}): {e}")
         return None
     finally:
-        # 다 썼으면 브라우저 닫기
         driver.quit()
 
 def run():
     # 깃허브 Secret 키 확인
     if 'GDRIVE_API_KEY' not in os.environ:
-        print("❌ 에러: GDRIVE_API_KEY가 없습니다. 설정에서 확인해주세요.")
+        print("❌ 에러: GDRIVE_API_KEY가 없습니다.")
         return
 
     # 구글 시트 로그인
@@ -115,51 +116,40 @@ def run():
     client = gspread.authorize(creds)
     
     try:
+        # URL로 시트 열기
         doc = client.open_by_url(SHEET_URL)
         print(f"✅ 구글 시트 연결 성공: {doc.title}")
     except Exception as e:
-        print(f"❌ 구글 시트 주소가 틀렸거나 권한이 없습니다: {e}")
+        print(f"❌ 구글 시트 연결 실패: {e}")
         return
 
-    # --- 아이템 4개 순서대로 작업 시작 ---
+    # --- 아이템 반복 작업 ---
     for i, item in enumerate(ITEMS):
-        # 주소가 "여기에..." 그대로면 건너뜀
         if "여기에" in item['url']:
-            print(f"⏭️ [Pass] {item['sheet_name']} (주소 미입력)")
             continue
 
         print(f"\n--- [{i+1}/4] {item['sheet_name']} 작업 중 ---")
         
-        # 1. 크롤링
         result_data = get_dnf_data(item['url'])
         
         if result_data:
             try:
-                # 2. 해당 탭(Sheet) 열기
                 worksheet = doc.worksheet(item['sheet_name'])
-                
-                # 3. 빈 줄 찾기 (B열 기준)
                 col_values = worksheet.col_values(START_COL)
                 next_row = max(START_ROW, len(col_values) + 1)
                 
-                # 4. 저장 [시간 + 데이터 6개]
                 now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 final_row = [now_time] + result_data
                 
-                # B열 ~ H열까지 한 줄에 기록
                 cell_range = f"B{next_row}:H{next_row}"
                 worksheet.update(range_name=cell_range, values=[final_row])
-                
                 print(f"💾 저장 완료: {final_row}")
                 
-            except gspread.exceptions.WorksheetNotFound:
-                print(f"❌ 에러: 시트 하단에 '{item['sheet_name']}' 탭이 없습니다. 탭을 먼저 만들어주세요.")
             except Exception as e:
-                print(f"❌ 저장 중 에러 발생: {e}")
+                print(f"❌ 저장 에러: {e}")
         else:
-            print("❌ 데이터를 가져오지 못했습니다.")
+            print("❌ 데이터 수집 실패")
         
-        # 다음 아이템 넘어가기 전 5초 휴식 (필수)
         time.sleep(5)
 
     display.stop()
