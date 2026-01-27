@@ -1,0 +1,28 @@
+name: DNF Crawler
+
+on:
+  schedule:
+    # 3시간마다 실행 (UTC 기준이므로 한국시간 계산 필요하지만, 간격은 3시간 맞음)
+    - cron: '0 */3 * * *'
+  workflow_dispatch: # 수동 실행 버튼
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        pip install selenium gspread google-auth
+
+    - name: Run script
+      env:
+        GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
+      run: python main.py
