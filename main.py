@@ -1,3 +1,6 @@
+기존 코드에 투자 그래프 "구매" 가격 수집 기능을 통합한 완성 코드입니다.
+
+python
 import os
 import json
 import time
@@ -19,7 +22,7 @@ from pyvirtualdisplay import Display
 # ==========================================
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1lKwU5aY6WGywhPRN1uIbCNjX8wQ7hcUNcGstgvoBeFI/edit"
 
-# 수집할 아이템 5개 목록
+# 수집할 아이템 5개 목록 (Sheet1~Sheet5)
 ITEMS = [
     {
         "url": "http://dnfnow.xyz/item?item_idx=bfc7bb0aefe4d0c432ebf77836e68e3c", 
@@ -42,6 +45,10 @@ ITEMS = [
         "sheet_name": "Sheet5"
     }
 ]
+
+# 투자 그래프 URL (Sheet6에 저장)
+INVEST_URL = "http://dnfnow.xyz/invest"
+INVEST_SHEET_NAME = "Sheet6"
 
 # 데이터 기록 시작 위치 (B5 셀부터 아래로)
 START_ROW = 5
@@ -78,11 +85,7 @@ def get_dnf_data(target_url):
         
         time.sleep(3) # 데이터 로딩 대기
 
-        # ========================================================
-        # 🧹 [수정된 부분] 텍스트 청소기 함수
-        # 1. replace로 ' 와 << 를 먼저 강제로 지웁니다.
-        # 2. re.sub로 숫자(0-9)가 아닌 모든 것을 한번 더 지웁니다.
-        # ========================================================
+        # 텍스트 청소기 함수
         def clean_text(text):
             # 1단계: 찌꺼기 문자 제거
             text = text.replace("'", "").replace("<<", "").replace(",", "")
@@ -108,6 +111,123 @@ def get_dnf_data(target_url):
     finally:
         driver.quit()
 
+
+def get_today_buy_price():
+    """
+    투자 그래프에서 오늘 날짜의 '구매' 가격만 추출
+    """
+    print(f"🔄 투자 그래프 '구매' 가격 수집 시작")
+    
+    # 브라우저 옵션 설정
+    chrome_options = Options()
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-gpu")
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    
+    try:
+        driver.get(INVEST_URL)
+        wait = WebDriverWait(driver, 30)
+        
+        # 차트가 로드될 때까지 대기
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
+        time.sleep(5)  # 차트 렌더링 완료 대기
+        
+        # JavaScript로 그래프의 '구매' 데이터만 추출
+        get_buy_price_script = """
+        var canvas = document.querySelector('canvas');
+        if (canvas && typeof Chart !== 'undefined') {
+            var chartInstance = Chart.getChart(canvas);
+            if (chartInstance && chartInstance.data) {
+                var labels = chartInstance.data.labels;
+                var datasets = chartInstance.data.datasets;
+                
+                // '구매' 데이터셋 찾기
+                var buyDataset = null;
+                for (var i = 0; i < datasets.length; i++) {
+                    var label = datasets[i].label;
+                    if (label && (label.includes('구매') || label.includes('buy') || label === '구매')) {
+                        buyDataset = datasets[i];
+                        break;
+                    }
+                }
+                
+                if (buyDataset && buyDataset.data.length > 0) {
+                    // 가장 최신 데이터 포인트 (오늘 날짜)
+                    var latestIndex = labels.length - 1;
+                    return {
+                        success: true,
+                        date: labels[latestIndex],
+                        price: buyDataset.data[latestIndex]
+                    };
+                }
+            }
+        }
+        return {success: false, error: '구매 데이터를 찾을 수 없습니다'};
+        """
+        
+        result = driver.execute_script(get_buy_price_script)
+        
+        if result and result.get('success'):
+            print(f"✅ 구매가격 수집 성공: {result['date']} - {result['price']}원")
+            return result
+        else:
+            error_msg = result.get('error', '알 수 없는 오류') if result else '데이터 없음'
+            print(f"⚠️ 구매가격 추출 실패: {error_msg}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ 투자 그래프 수집 실패: {e}")
+        return None
+    finally:
+        driver.quit()
+
+
+def save_buy_price_to_sheet(doc, buy_data):
+    """
+    구매 가격을 Sheet6에 저장
+    매 12시간마다 현재 시간의 구매가만 한 줄 추가
+    """
+    if not buy_data or not buy_data.get('success'):
+        print("❌ 저장할 구매 데이터가 없습니다")
+        return
+    
+    try:
+        # Sheet6 열기 또는 생성
+        try:
+            worksheet = doc.worksheet(INVEST_SHEET_NAME)
+            print(f"✅ '{INVEST_SHEET_NAME}' 시트 연결 완료")
+        except:
+            worksheet = doc.add_worksheet(title=INVEST_SHEET_NAME, rows=1000, cols=10)
+            # 헤더 작성
+            headers = ['수집시간', '그래프날짜', '구매가격(원)']
+            worksheet.update('A1:C1', [headers])
+            print(f"✅ '{INVEST_SHEET_NAME}' 시트 생성 완료")
+        
+        # 다음 행 찾기
+        col_values = worksheet.col_values(1)
+        next_row = max(2, len(col_values) + 1)  # 최소 2행부터 시작 (헤더 다음)
+        
+        # 현재 시간 (한국 시간)
+        kst = ZoneInfo("Asia/Seoul")
+        collection_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 데이터 준비
+        graph_date = buy_data.get('date', '')
+        price = buy_data.get('price', 0)
+        
+        # 시트에 저장
+        row_data = [collection_time, graph_date, price]
+        worksheet.update(f'A{next_row}:C{next_row}', [row_data])
+        
+        print(f"💾 구매가격 저장 완료: {collection_time} | {graph_date} | {price}원")
+        
+    except Exception as e:
+        print(f"❌ 구매가격 저장 실패: {e}")
+
+
 def run():
     # 깃허브 Secret 키 확인
     if 'GDRIVE_API_KEY' not in os.environ:
@@ -128,12 +248,18 @@ def run():
         print(f"❌ 구글 시트 연결 실패: {e}")
         return
 
-    # --- 아이템 반복 작업 ---
+    # ==========================================
+    # 1️⃣ 아이템 데이터 수집 (Sheet1~Sheet5)
+    # ==========================================
+    print("\n" + "="*50)
+    print("📦 아이템 데이터 수집 시작 (Sheet1~Sheet5)")
+    print("="*50)
+    
     for i, item in enumerate(ITEMS):
         if "여기에" in item['url']:
             continue
 
-        print(f"\\n--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
+        print(f"\n--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
         
         result_data = get_dnf_data(item['url'])
         
@@ -160,8 +286,34 @@ def run():
         
         time.sleep(5)
 
-    display.stop()
-    print("\\n🎉 모든 작업 종료")
+    # ==========================================
+    # 2️⃣ 투자 그래프 구매가격 수집 (Sheet6)
+    # ==========================================
+    print("\n" + "="*50)
+    print("💰 투자 그래프 '구매' 가격 수집 시작 (Sheet6)")
+    print("="*50)
+    
+    buy_price_data = get_today_buy_price()
+    
+    if buy_price_data:
+        save_buy_price_to_sheet(doc, buy_price_data)
+    else:
+        print("❌ 구매가격 수집 실패")
+    
+    # ==========================================
+    # 3️⃣ 작업 종료
+    # ==========================================
+    try:
+        display.stop()
+    except:
+        pass
+    
+    print("\n" + "="*50)
+    print("🎉 모든 작업 완료!")
+    print("="*50)
+    print(f"✅ Sheet1~5: 아이템 거래 데이터 수집 완료")
+    print(f"✅ Sheet6: 투자 구매가격 수집 완료")
+    print("="*50)
 
 if __name__ == "__main__":
     run()
