@@ -3,6 +3,7 @@ import json
 import time
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -18,7 +19,7 @@ from pyvirtualdisplay import Display
 # ==========================================
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1lKwU5aY6WGywhPRN1uIbCNjX8wQ7hcUNcGstgvoBeFI/edit"
 
-# 수집할 아이템 4개 목록
+# 수집할 아이템 5개 목록
 ITEMS = [
     {
         "url": "http://dnfnow.xyz/item?item_idx=bfc7bb0aefe4d0c432ebf77836e68e3c", 
@@ -35,6 +36,10 @@ ITEMS = [
     {
         "url": "http://dnfnow.xyz/item?item_idx=bb5a6aeb6b44bbdce835679bef4335b5", 
         "sheet_name": "Sheet4"
+    },
+    {
+        "url": "http://dnfnow.xyz/item?item_idx=55be75a1c024aac3ef84ed3bed5b8db9", 
+        "sheet_name": "Sheet5"
     }
 ]
 
@@ -128,7 +133,7 @@ def run():
         if "여기에" in item['url']:
             continue
 
-        print(f"\n--- [{i+1}/4] {item['sheet_name']} 작업 중 ---")
+        print(f"\\n--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
         
         result_data = get_dnf_data(item['url'])
         
@@ -138,7 +143,10 @@ def run():
                 col_values = worksheet.col_values(START_COL)
                 next_row = max(START_ROW, len(col_values) + 1)
                 
-                now_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # 한국 시간(UTC+9) 기준으로 현재 시간 가져오기
+                kst = ZoneInfo("Asia/Seoul")
+                now_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+                
                 final_row = [now_time] + result_data
                 
                 cell_range = f"B{next_row}:H{next_row}"
@@ -153,7 +161,7 @@ def run():
         time.sleep(5)
 
     display.stop()
-    print("\n🎉 모든 작업 종료")
+    print("\\n🎉 모든 작업 종료")
 
 if __name__ == "__main__":
     run()
