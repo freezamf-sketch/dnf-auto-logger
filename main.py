@@ -112,6 +112,7 @@ def get_dnf_data(target_url):
 def get_today_buy_price():
     """
     투자 그래프에서 오늘 날짜의 '구매' 가격만 추출
+    여러 방법을 시도하여 데이터 추출
     """
     print(f"🔄 투자 그래프 '구매' 가격 수집 시작")
     
@@ -131,59 +132,119 @@ def get_today_buy_price():
         
         wait = WebDriverWait(driver, 30)
         
-        # 차트가 로드될 때까지 대기
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
-        time.sleep(5)  # 차트 렌더링 완료 대기
+        # 페이지 로딩 완료 대기
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        time.sleep(8)  # 차트 완전 로딩 대기 시간 증가
         
-        # JavaScript로 그래프의 '구매' 데이터만 추출
+        print("📊 차트 데이터 추출 시도 중...")
+        
+        # 방법 1: Chart.js API 사용
         get_buy_price_script = """
         try {
+            // Chart.js 로드 확인
+            if (typeof Chart === 'undefined') {
+                return {success: false, error: 'Chart.js 라이브러리가 로드되지 않았습니다', method: 'chartjs'};
+            }
+            
             var canvas = document.querySelector('canvas');
-            if (canvas && typeof Chart !== 'undefined') {
-                var chartInstance = Chart.getChart(canvas);
-                if (chartInstance && chartInstance.data) {
-                    var labels = chartInstance.data.labels;
-                    var datasets = chartInstance.data.datasets;
-                    
-                    // '구매' 데이터셋 찾기
-                    var buyDataset = null;
-                    for (var i = 0; i < datasets.length; i++) {
-                        var label = datasets[i].label;
-                        if (label && (label.includes('구매') || label.includes('buy') || label === '구매')) {
-                            buyDataset = datasets[i];
-                            break;
-                        }
-                    }
-                    
-                    if (buyDataset && buyDataset.data.length > 0) {
-                        // 가장 최신 데이터 포인트 (오늘 날짜)
-                        var latestIndex = labels.length - 1;
-                        return {
-                            success: true,
-                            date: labels[latestIndex],
-                            price: buyDataset.data[latestIndex]
-                        };
-                    }
+            if (!canvas) {
+                return {success: false, error: 'Canvas 요소를 찾을 수 없습니다', method: 'chartjs'};
+            }
+            
+            var chartInstance = Chart.getChart(canvas);
+            if (!chartInstance || !chartInstance.data) {
+                return {success: false, error: 'Chart 인스턴스를 찾을 수 없습니다', method: 'chartjs'};
+            }
+            
+            var labels = chartInstance.data.labels;
+            var datasets = chartInstance.data.datasets;
+            
+            // '구매' 데이터셋 찾기
+            var buyDataset = null;
+            for (var i = 0; i < datasets.length; i++) {
+                var label = datasets[i].label || '';
+                if (label.includes('구매') || label.includes('buy') || label === '구매') {
+                    buyDataset = datasets[i];
+                    break;
                 }
             }
-            return {success: false, error: '구매 데이터를 찾을 수 없습니다'};
+            
+            if (buyDataset && buyDataset.data && buyDataset.data.length > 0) {
+                var latestIndex = labels.length - 1;
+                return {
+                    success: true,
+                    date: labels[latestIndex],
+                    price: buyDataset.data[latestIndex],
+                    method: 'chartjs'
+                };
+            }
+            
+            return {success: false, error: '구매 데이터셋을 찾을 수 없습니다', method: 'chartjs'};
+            
         } catch(e) {
-            return {success: false, error: e.toString()};
+            return {success: false, error: e.toString(), method: 'chartjs'};
         }
         """
         
         result = driver.execute_script(get_buy_price_script)
         
         if result and result.get('success'):
-            print(f"✅ 구매가격 수집 성공: {result.get('date')} - {result.get('price')}원")
+            print(f"✅ 구매가격 수집 성공 (방법: {result.get('method')})")
+            print(f"   날짜: {result.get('date')} | 가격: {result.get('price')}원")
             return result
         else:
             error_msg = result.get('error', '알 수 없는 오류') if result else '데이터 없음'
-            print(f"⚠️ 구매가격 추출 실패: {error_msg}")
-            return None
+            print(f"⚠️ Chart.js 방법 실패: {error_msg}")
+            
+            # 방법 2: window 객체에서 직접 찾기
+            print("📊 대체 방법 시도 중...")
+            fallback_script = """
+            try {
+                // 모든 전역 변수에서 차트 데이터 찾기
+                var allCharts = Object.keys(window).filter(key => 
+                    window[key] && typeof window[key] === 'object' && 
+                    window[key].data && window[key].data.labels
+                );
+                
+                if (allCharts.length > 0) {
+                    var chartData = window[allCharts[0]].data;
+                    var labels = chartData.labels;
+                    var datasets = chartData.datasets;
+                    
+                    for (var i = 0; i < datasets.length; i++) {
+                        var label = datasets[i].label || '';
+                        if (label.includes('구매')) {
+                            var latestIndex = labels.length - 1;
+                            return {
+                                success: true,
+                                date: labels[latestIndex],
+                                price: datasets[i].data[latestIndex],
+                                method: 'window'
+                            };
+                        }
+                    }
+                }
+                
+                return {success: false, error: '대체 방법으로도 데이터를 찾을 수 없습니다', method: 'window'};
+            } catch(e) {
+                return {success: false, error: e.toString(), method: 'window'};
+            }
+            """
+            
+            result2 = driver.execute_script(fallback_script)
+            
+            if result2 and result2.get('success'):
+                print(f"✅ 구매가격 수집 성공 (방법: {result2.get('method')})")
+                print(f"   날짜: {result2.get('date')} | 가격: {result2.get('price')}원")
+                return result2
+            else:
+                print(f"❌ 모든 방법 실패")
+                return None
             
     except Exception as e:
         print(f"❌ 투자 그래프 수집 실패: {e}")
+        import traceback
+        traceback.print_exc()
         return None
     finally:
         if driver:
@@ -195,46 +256,46 @@ def get_today_buy_price():
 
 def save_buy_price_to_sheet(doc, buy_data):
     """
-    구매 가격을 Sheet6에 저장
+    구매 가격을 Sheet6에 저장 (B5 셀부터 시작, Sheet1~5와 동일한 형식)
     """
     if not buy_data or not buy_data.get('success'):
-        print("⚠️ 저장할 구매 데이터가 없습니다 (스킵)")
+        print("⚠️ 저장할 구매 데이터가 없습니다 (Sheet6 스킵)")
         return
     
     try:
-        # Sheet6 열기 또는 생성
+        # Sheet6 열기
         try:
             worksheet = doc.worksheet(INVEST_SHEET_NAME)
             print(f"✅ '{INVEST_SHEET_NAME}' 시트 연결 완료")
         except:
-            worksheet = doc.add_worksheet(title=INVEST_SHEET_NAME, rows=1000, cols=10)
-            headers = ['수집시간', '그래프날짜', '구매가격(원)']
-            worksheet.update('A1:C1', [headers])
-            print(f"✅ '{INVEST_SHEET_NAME}' 시트 생성 완료")
+            print(f"❌ '{INVEST_SHEET_NAME}' 시트를 찾을 수 없습니다")
+            return
         
-        # 다음 행 찾기
-        try:
-            col_values = worksheet.col_values(1)
-            next_row = max(2, len(col_values) + 1)
-        except:
-            next_row = 2
+        # B열의 데이터 개수 확인하여 다음 행 계산 (Sheet1~5와 동일한 방식)
+        col_values = worksheet.col_values(START_COL)
+        next_row = max(START_ROW, len(col_values) + 1)
         
         # 현재 시간 (한국 시간)
         kst = ZoneInfo("Asia/Seoul")
         collection_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
         
-        # 데이터 준비
+        # 데이터 준비 (Sheet1~5와 동일한 형식)
         graph_date = str(buy_data.get('date', ''))
         price = buy_data.get('price', 0)
         
-        # 시트에 저장
+        # [시간, 그래프날짜, 구매가격] 형식으로 저장
         row_data = [collection_time, graph_date, price]
-        worksheet.update(f'A{next_row}:C{next_row}', [row_data])
         
-        print(f"💾 구매가격 저장 완료: {collection_time} | {graph_date} | {price}원")
+        # B열부터 D열까지 저장 (B5부터 시작)
+        cell_range = f"B{next_row}:D{next_row}"
+        worksheet.update(range_name=cell_range, values=[row_data])
+        
+        print(f"💾 Sheet6 저장 완료: {row_data}")
         
     except Exception as e:
-        print(f"❌ 구매가격 저장 실패: {e}")
+        print(f"❌ Sheet6 저장 실패: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def run():
@@ -318,7 +379,10 @@ def run():
         print("🎉 모든 작업 완료!")
         print("="*50)
         print(f"✅ Sheet1~5: 아이템 거래 데이터 수집 완료")
-        print(f"✅ Sheet6: 투자 구매가격 수집 완료")
+        if buy_price_data and buy_price_data.get('success'):
+            print(f"✅ Sheet6: 투자 구매가격 수집 완료")
+        else:
+            print(f"⚠️ Sheet6: 투자 구매가격 수집 실패 (차트 데이터 없음)")
         print("="*50)
         
     except Exception as e:
