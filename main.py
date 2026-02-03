@@ -1,7 +1,8 @@
-import os
+'import os
 import json
 import time
 import re
+import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from selenium import webdriver
@@ -12,6 +13,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.errors import HttpError
 from pyvirtualdisplay import Display
 import math
 
@@ -51,214 +53,256 @@ INVEST_SHEET_NAME = "Sheet6"
 # 데이터 기록 시작 위치 (B5 셀부터 아래로)
 START_ROW = 5
 START_COL = 2
+
+# 재시도 설정
+MAX_RETRIES = 3
+MAX_CHART_RETRIES = 3
 # ==========================================
 
-def get_dnf_data(target_url):
+def get_dnf_data(target_url, max_retries=MAX_RETRIES):
     """
     사이트에 접속해서 '실제 거래된 가격' 표의 숫자만 쏙 뽑아오는 함수
+    재시도 로직 포함
     """
-    print(f"🔄 접속 시도: {target_url}")
     
-    driver = None
-    try:
-        # 브라우저 옵션 설정
-        chrome_options = Options()
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--headless")
-        
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(30)
-        driver.get(target_url)
-        
-        wait = WebDriverWait(driver, 30)
-        
-        # 1. '24시간내'라는 글자가 있는 줄 찾기
-        row_24_xpath = "//td[contains(text(), '24시간내')]/parent::tr"
-        wait.until(EC.presence_of_element_located((By.XPATH, row_24_xpath)))
-        
-        time.sleep(3) # 데이터 로딩 대기
+    for attempt in range(max_retries):
+        driver = None
+        try:
+            print(f"🔄 [{attempt+1}/{max_retries}] 접속 시도: {target_url}")
+            
+            # 브라우저 옵션 설정
+            chrome_options = Options()
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--headless")
+            
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(30)
+            driver.get(target_url)
+            
+            wait = WebDriverWait(driver, 30)
+            
+            # 1. '24시간내'라는 글자가 있는 줄 찾기
+            row_24_xpath = "//td[contains(text(), '24시간내')]/parent::tr"
+            wait.until(EC.presence_of_element_located((By.XPATH, row_24_xpath)))
+            
+            # 2. '72시간내'도 로딩될 때까지 명시적 대기 (고정 sleep 대신)
+            row_72_xpath = "//td[contains(text(), '72시간내')]/parent::tr"
+            wait.until(EC.presence_of_element_located((By.XPATH, row_72_xpath)))
+            
+            # 추가 안정화 대기 (필요시)
+            time.sleep(2)
 
-        # 텍스트 청소기 함수
-        def clean_text(text):
-            text = text.replace("'", "").replace("<<", "").replace(",", "")
-            return re.sub(r'[^0-9]', '', text).strip()
+            # 텍스트 청소기 함수
+            def clean_text(text):
+                text = text.replace("'", "").replace("<<", "").replace(",", "")
+                return re.sub(r'[^0-9]', '', text).strip()
 
-        # 2. 24시간 데이터 추출
-        row_24_elem = driver.find_element(By.XPATH, row_24_xpath)
-        cols_24 = row_24_elem.find_elements(By.TAG_NAME, "td")
-        data_24 = [clean_text(cols_24[i].text) for i in range(1, 4)]
+            # 3. 24시간 데이터 추출
+            row_24_elem = driver.find_element(By.XPATH, row_24_xpath)
+            cols_24 = row_24_elem.find_elements(By.TAG_NAME, "td")
+            data_24 = [clean_text(cols_24[i].text) for i in range(1, 4)]
 
-        # 3. 72시간 데이터 추출
-        row_72_xpath = "//td[contains(text(), '72시간내')]/parent::tr"
-        row_72_elem = driver.find_element(By.XPATH, row_72_xpath)
-        cols_72 = row_72_elem.find_elements(By.TAG_NAME, "td")
-        data_72 = [clean_text(cols_72[i].text) for i in range(1, 4)]
-        
-        return data_24 + data_72
+            # 4. 72시간 데이터 추출
+            row_72_elem = driver.find_element(By.XPATH, row_72_xpath)
+            cols_72 = row_72_elem.find_elements(By.TAG_NAME, "td")
+            data_72 = [clean_text(cols_72[i].text) for i in range(1, 4)]
+            
+            result = data_24 + data_72
+            print(f"✅ 데이터 수집 성공: {result}")
+            return result
 
-    except Exception as e:
-        print(f"⚠️ 수집 실패 ({target_url}): {e}")
-        return None
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
+        except Exception as e:
+            print(f"⚠️ [{attempt+1}/{max_retries}] 수집 실패: {e}")
+            if attempt < max_retries - 1:
+                wait_time = 5 * (attempt + 1)  # 5, 10, 15초 대기
+                print(f"   {wait_time}초 후 재시도...")
+                time.sleep(wait_time)
+            else:
+                print(f"❌ 최종 실패 ({target_url})")
+                import traceback
+                traceback.print_exc()
+                return None
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception as e:
+                    print(f"⚠️ 드라이버 종료 실패: {e}")
 
 
-def get_today_buy_price_from_chart():
+def get_today_buy_price_from_chart(max_retries=MAX_CHART_RETRIES):
     """
     투자 페이지에서 구매가격 추출 - Chart 객체 직접 접근
+    재시도 로직 포함
     """
-    print(f"🔄 투자 페이지에서 구매가격 추출 시작")
     
-    driver = None
-    try:
-        # 브라우저 옵션 설정
-        chrome_options = Options()
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--headless")
-        
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(30)
-        driver.get(INVEST_URL)
-        
-        wait = WebDriverWait(driver, 30)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        time.sleep(10)  # 차트 로딩 대기
-        
-        kst = ZoneInfo("Asia/Seoul")
-        today = datetime.now(kst)
-        today_yyyymmdd = today.strftime("%Y%m%d")
-        
-        print(f"📅 오늘 날짜: {today_yyyymmdd}")
-        print(f"📊 차트 데이터 추출 시도...")
-        
-        # Chart.js 구버전 대응 - canvas의 chart 속성 직접 접근
-        extract_script = """
-        try {
-            // 방법 1: canvas.chart 속성으로 직접 접근 (구버전 Chart.js)
-            var canvas = document.querySelector('canvas');
-            if (!canvas) {
-                return {success: false, error: 'Canvas 없음'};
-            }
+    for attempt in range(max_retries):
+        driver = None
+        try:
+            print(f"🔄 [{attempt+1}/{max_retries}] 투자 페이지 접속 시도")
             
-            var chart = canvas.chart || canvas.__chart__ || null;
+            # 브라우저 옵션 설정
+            chrome_options = Options()
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--headless")
             
-            // 방법 2: Chart.instances 사용 (구버전)
-            if (!chart && typeof Chart !== 'undefined' && Chart.instances) {
-                var instances = Chart.instances;
-                for (var key in instances) {
-                    if (instances.hasOwnProperty(key)) {
-                        chart = instances[key];
-                        break;
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(30)
+            driver.get(INVEST_URL)
+            
+            wait = WebDriverWait(driver, 30)
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            
+            # 차트 로딩 대기 - canvas 요소가 나타날 때까지
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "canvas")))
+            time.sleep(10)  # 차트 데이터 로딩 추가 대기
+            
+            kst = ZoneInfo("Asia/Seoul")
+            today = datetime.now(kst)
+            today_yyyymmdd = today.strftime("%Y%m%d")
+            
+            print(f"📅 오늘 날짜: {today_yyyymmdd}")
+            print(f"📊 차트 데이터 추출 시도...")
+            
+            # Chart.js 구버전 대응 - canvas의 chart 속성 직접 접근
+            extract_script = """
+            try {
+                // 방법 1: canvas.chart 속성으로 직접 접근 (구버전 Chart.js)
+                var canvas = document.querySelector('canvas');
+                if (!canvas) {
+                    return {success: false, error: 'Canvas 없음'};
+                }
+                
+                var chart = canvas.chart || canvas.__chart__ || null;
+                
+                // 방법 2: Chart.instances 사용 (구버전)
+                if (!chart && typeof Chart !== 'undefined' && Chart.instances) {
+                    var instances = Chart.instances;
+                    for (var key in instances) {
+                        if (instances.hasOwnProperty(key)) {
+                            chart = instances[key];
+                            break;
+                        }
                     }
                 }
-            }
-            
-            // 방법 3: 모든 canvas 요소 확인
-            if (!chart) {
-                var allCanvas = document.querySelectorAll('canvas');
-                for (var i = 0; i < allCanvas.length; i++) {
-                    if (allCanvas[i].chart || allCanvas[i].__chart__) {
-                        chart = allCanvas[i].chart || allCanvas[i].__chart__;
-                        break;
+                
+                // 방법 3: 모든 canvas 요소 확인
+                if (!chart) {
+                    var allCanvas = document.querySelectorAll('canvas');
+                    for (var i = 0; i < allCanvas.length; i++) {
+                        if (allCanvas[i].chart || allCanvas[i].__chart__) {
+                            chart = allCanvas[i].chart || allCanvas[i].__chart__;
+                            break;
+                        }
                     }
                 }
-            }
-            
-            if (!chart || !chart.data || !chart.data.datasets) {
-                return {success: false, error: 'Chart 인스턴스 없음'};
-            }
-            
-            var datasets = chart.data.datasets;
-            var labels = chart.data.labels;
-            
-            // '구매' 데이터셋 찾기
-            for (var i = 0; i < datasets.length; i++) {
-                var label = (datasets[i].label || '').toLowerCase();
-                if (label.includes('구매') || label === '구매' || label.includes('buy')) {
-                    var data = datasets[i].data;
-                    if (data && data.length > 0) {
-                        var lastPrice = data[data.length - 1];
-                        var lastLabel = labels[labels.length - 1];
-                        return {
-                            success: true,
-                            price: Math.floor(lastPrice),
-                            raw_price: lastPrice,
-                            label: String(lastLabel),
-                            total: data.length,
-                            method: 'canvas.chart'
-                        };
+                
+                if (!chart || !chart.data || !chart.data.datasets) {
+                    return {success: false, error: 'Chart 인스턴스 없음'};
+                }
+                
+                var datasets = chart.data.datasets;
+                var labels = chart.data.labels;
+                
+                // '구매' 데이터셋 찾기
+                for (var i = 0; i < datasets.length; i++) {
+                    var label = (datasets[i].label || '').toLowerCase();
+                    if (label.includes('구매') || label === '구매' || label.includes('buy')) {
+                        var data = datasets[i].data;
+                        if (data && data.length > 0) {
+                            var lastPrice = data[data.length - 1];
+                            var lastLabel = labels[labels.length - 1];
+                            return {
+                                success: true,
+                                price: Math.floor(lastPrice),
+                                raw_price: lastPrice,
+                                label: String(lastLabel),
+                                total: data.length,
+                                method: 'canvas.chart'
+                            };
+                        }
                     }
                 }
+                
+                return {success: false, error: '구매 데이터셋 없음'};
+                
+            } catch(e) {
+                return {success: false, error: e.toString()};
             }
+            """
             
-            return {success: false, error: '구매 데이터셋 없음'};
+            result = driver.execute_script(extract_script)
             
-        } catch(e) {
-            return {success: false, error: e.toString()};
-        }
-        """
-        
-        result = driver.execute_script(extract_script)
-        
-        if result and result.get('success'):
-            print(f"✅ 구매가격 추출 성공! (방법: {result.get('method')})")
-            print(f"   그래프 레이블: {result.get('label')}")
-            print(f"   원본 가격: {result.get('raw_price')}")
-            print(f"   버림 처리: {result.get('price')}원")
-            
-            return {
-                'success': True,
-                'date': today_yyyymmdd,
-                'price': result.get('price')
-            }
-        
-        print(f"⚠️ Chart 접근 실패: {result.get('error') if result else 'Unknown'}")
-        print(f"📊 네트워크 요청 분석 시도...")
-        
-        # 방법 4: 네트워크 로그에서 API 응답 찾기
-        performance_script = """
-        try {
-            var perfEntries = performance.getEntriesByType('resource');
-            var apiData = [];
-            for (var i = 0; i < perfEntries.length; i++) {
-                if (perfEntries[i].name.includes('api') || perfEntries[i].name.includes('data')) {
-                    apiData.push(perfEntries[i].name);
+            if result and result.get('success'):
+                print(f"✅ 구매가격 추출 성공! (방법: {result.get('method')})")
+                print(f"   그래프 레이블: {result.get('label')}")
+                print(f"   원본 가격: {result.get('raw_price')}")
+                print(f"   버림 처리: {result.get('price')}원")
+                
+                return {
+                    'success': True,
+                    'date': today_yyyymmdd,
+                    'price': result.get('price')
                 }
-            }
-            return {success: false, error: '네트워크 분석 시도', apis: apiData};
-        } catch(e) {
-            return {success: false, error: e.toString()};
-        }
-        """
-        
-        perf_result = driver.execute_script(performance_script)
-        if perf_result and perf_result.get('apis'):
-            print(f"   발견된 API: {perf_result.get('apis')}")
-        
-        print(f"❌ 모든 방법 실패")
-        return None
             
-    except Exception as e:
-        print(f"❌ 투자 페이지 접속 실패: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
+            print(f"⚠️ [{attempt+1}/{max_retries}] Chart 접근 실패: {result.get('error') if result else 'Unknown'}")
+            
+            if attempt < max_retries - 1:
+                print(f"   10초 후 재시도...")
+                time.sleep(10)
+            else:
+                print(f"❌ 최종 실패: 모든 방법 실패")
+                return None
+                
+        except Exception as e:
+            print(f"⚠️ [{attempt+1}/{max_retries}] 투자 페이지 접속 실패: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(10)
+            else:
+                print(f"❌ 최종 실패")
+                import traceback
+                traceback.print_exc()
+                return None
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception as e:
+                    print(f"⚠️ 드라이버 종료 실패: {e}")
+
+
+def update_sheet_with_retry(worksheet, cell_range, values, max_retries=3):
+    """
+    구글 시트 업데이트 - 재시도 로직 포함
+    """
+    for attempt in range(max_retries):
+        try:
+            worksheet.update(range_name=cell_range, values=values)
+            return True
+        except HttpError as e:
+            if e.resp.status in [429, 500, 503]:  # Rate limit or server error
+                wait_time = 2 ** attempt  # 1, 2, 4초 exponential backoff
+                print(f"⚠️ API 에러 [{attempt+1}/{max_retries}]: {e.resp.status}")
+                if attempt < max_retries - 1:
+                    print(f"   {wait_time}초 후 재시도...")
+                    time.sleep(wait_time)
+            else:
+                print(f"❌ HTTP 에러 (재시도 불가): {e}")
+                raise
+        except Exception as e:
+            print(f"⚠️ 예상치 못한 에러 [{attempt+1}/{max_retries}]: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)
+            else:
+                raise
+    
+    return False
 
 
 def save_invest_price_to_sheet(doc, price_data):
@@ -285,18 +329,24 @@ def save_invest_price_to_sheet(doc, price_data):
         row_data = [collection_time, date_str, price]
         cell_range = f"B{next_row}:D{next_row}"
         
-        worksheet.update(range_name=cell_range, values=[row_data])
-        
-        print(f"✅ Sheet6 저장 성공: {row_data}")
-        return True
+        # 재시도 로직 포함된 업데이트
+        if update_sheet_with_retry(worksheet, cell_range, [row_data]):
+            print(f"✅ Sheet6 저장 성공: {row_data}")
+            return True
+        else:
+            print(f"❌ Sheet6 저장 실패 (재시도 초과)")
+            return False
         
     except Exception as e:
-        print(f"❌ Sheet6 저장 실패: {e}")
+        print(f"❌ Sheet6 저장 에러: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
 def run():
     display = None
+    failed_items = []  # 실패 추적 리스트
     
     try:
         display = Display(visible=0, size=(1920, 1080))
@@ -308,7 +358,7 @@ def run():
     try:
         if 'GDRIVE_API_KEY' not in os.environ:
             print("❌ 에러: GDRIVE_API_KEY가 없습니다.")
-            return
+            sys.exit(1)
 
         json_key = json.loads(os.environ['GDRIVE_API_KEY'])
         scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
@@ -318,7 +368,7 @@ def run():
         doc = client.open_by_url(SHEET_URL)
         print(f"✅ 구글 시트 연결 성공: {doc.title}")
 
-        print("\n" + "="*50)
+        print("\\n" + "="*50)
         print("📦 아이템 데이터 수집 시작 (Sheet1~Sheet5)")
         print("="*50)
         
@@ -326,7 +376,7 @@ def run():
             if "여기에" in item['url']:
                 continue
 
-            print(f"\n--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
+            print(f"\\n--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
             
             result_data = get_dnf_data(item['url'])
             
@@ -340,51 +390,69 @@ def run():
                     now_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
                     
                     final_row = [now_time] + result_data
-                    
                     cell_range = f"B{next_row}:H{next_row}"
-                    worksheet.update(range_name=cell_range, values=[final_row])
-                    print(f"💾 저장 완료: {final_row}")
+                    
+                    # 재시도 로직 포함된 업데이트
+                    if update_sheet_with_retry(worksheet, cell_range, [final_row]):
+                        print(f"💾 저장 완료: {final_row}")
+                    else:
+                        print(f"❌ {item['sheet_name']} 저장 최종 실패")
+                        failed_items.append(item['sheet_name'])
                     
                 except Exception as e:
-                    print(f"❌ 저장 에러: {e}")
+                    print(f"❌ {item['sheet_name']} 저장 에러: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    failed_items.append(item['sheet_name'])
             else:
-                print("❌ 데이터 수집 실패")
+                print(f"❌ {item['sheet_name']} 데이터 수집 실패")
+                failed_items.append(item['sheet_name'])
             
             time.sleep(5)
 
-        print("\n" + "="*50)
+        print("\\n" + "="*50)
         print("💰 투자 페이지 구매가격 수집 (Sheet6)")
         print("="*50)
         
+        chart_success = False
         today_price_data = get_today_buy_price_from_chart()
         
-        if today_price_data:
-            save_invest_price_to_sheet(doc, today_price_data)
-        else:
-            print("❌ Sheet6: 구매가격 데이터를 가져올 수 없습니다")
-        
-        print("\n" + "="*50)
-        print("🎉 모든 작업 완료!")
-        print("="*50)
-        print(f"✅ Sheet1~5: 아이템 거래 데이터 수집 완료")
         if today_price_data and today_price_data.get('success'):
-            print(f"✅ Sheet6: 투자 구매가격 수집 완료 ({today_price_data.get('price')}원)")
-        else:
-            print(f"❌ Sheet6: 투자 구매가격 수집 실패")
+            if save_invest_price_to_sheet(doc, today_price_data):
+                chart_success = True
+        
+        if not chart_success:
+            print("❌ Sheet6: 구매가격 수집/저장 실패")
+            failed_items.append('Sheet6')
+        
+        print("\\n" + "="*50)
+        print("📊 최종 결과")
         print("="*50)
+        
+        if failed_items:
+            print(f"❌ 실패한 시트 ({len(failed_items)}개): {', '.join(failed_items)}")
+            print(f"✅ 성공한 시트: {6 - len(failed_items)}개")
+            print("="*50)
+            print("⚠️ 일부 데이터 수집 실패 - 워크플로우 실패로 종료")
+            sys.exit(1)  # GitHub Actions가 실패로 인식
+        else:
+            print("✅ 모든 시트 (6개) 데이터 수집 성공!")
+            print("="*50)
+            sys.exit(0)  # 정상 종료
         
     except Exception as e:
-        print(f"\n❌ 프로그램 실행 중 오류 발생: {e}")
+        print(f"\\n❌ 프로그램 실행 중 치명적 오류 발생: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)  # 실패로 종료
         
     finally:
         if display:
             try:
                 display.stop()
                 print("✅ 가상 디스플레이 종료")
-            except:
-                pass
+            except Exception as e:
+                print(f"⚠️ 가상 디스플레이 종료 실패: {e}")
 
 if __name__ == "__main__":
     run()
