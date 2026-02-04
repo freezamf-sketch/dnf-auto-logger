@@ -22,6 +22,7 @@ import math
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1lKwU5aY6WGywhPRN1uIbCNjX8wQ7hcUNcGstgvoBeFI/edit"
 
 # 수집할 아이템 9개 목록 (Sheet1~Sheet5, Sheet7~Sheet10)
+# 수집할 아이템 9개 목록 (Sheet1~Sheet5, Sheet7~Sheet10)
 ITEMS = [
     {
         "url": "http://dnfnow.xyz/item?item_idx=bfc7bb0aefe4d0c432ebf77836e68e3c", 
@@ -52,11 +53,11 @@ ITEMS = [
         "sheet_name": "Sheet8"
     },
     {
-        "http://dnfnow.xyz/item?item_idx=51f381d45d16ef4273ae25f01f7ea4c2", 
+        "url": "http://dnfnow.xyz/item?item_idx=51f381d45d16ef4273ae25f01f7ea4c2", 
         "sheet_name": "Sheet9"
     },
     {
-        "url": "여기에_새_URL_입력", 
+        "url": "PLACEHOLDER_URL_10", 
         "sheet_name": "Sheet10"
     }
 ]
