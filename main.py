@@ -21,7 +21,7 @@ import math
 # ==========================================
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1lKwU5aY6WGywhPRN1uIbCNjX8wQ7hcUNcGstgvoBeFI/edit"
 
-# 수집할 아이템 5개 목록 (Sheet1~Sheet5)
+# 수집할 아이템 9개 목록 (Sheet1~Sheet5, Sheet7~Sheet10)
 ITEMS = [
     {
         "url": "http://dnfnow.xyz/item?item_idx=bfc7bb0aefe4d0c432ebf77836e68e3c", 
@@ -42,10 +42,22 @@ ITEMS = [
     {
         "url": "http://dnfnow.xyz/item?item_idx=55be75a1c024aac3ef84ed3bed5b8db9", 
         "sheet_name": "Sheet5"
+    },
+    {
+        "url": "http://dnfnow.xyz/item?item_idx=4e5c23c6083931685b79d8b542eeb268", 
+        "sheet_name": "Sheet7"
+    },
+    {
+        "url": "http://dnfnow.xyz/item?item_idx=028f60ed1253313f5bbd99f228461f33", 
+        "sheet_name": "Sheet8"
+    },
+    {
+        "http://dnfnow.xyz/item?item_idx=51f381d45d16ef4273ae25f01f7ea4c2", 
+        "sheet_name": "Sheet9"
     }
 ]
 
-# 투자 페이지 URL (Sheet6에 저장)
+# 투자 페이지 URL (Sheet6에 저장) - 그대로 유지!
 INVEST_URL = "http://dnfnow.xyz/invest"
 INVEST_SHEET_NAME = "Sheet6"
 
@@ -390,15 +402,16 @@ def run():
 
         print()
         print("="*50)
-        print("📦 아이템 데이터 수집 시작 (Sheet1~Sheet5)")
+        print("📦 아이템 데이터 수집 시작 (9개 아이템)")
         print("="*50)
         
         for i, item in enumerate(ITEMS):
             if "여기에" in item['url']:
+                print(f"⏭️  [{i+1}/9] {item['sheet_name']} 스킵 (URL 미설정)")
                 continue
 
             print()
-            print(f"--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
+            print(f"--- [{i+1}/9] {item['sheet_name']} 작업 중 ---")
             
             result_data = get_dnf_data(item['url'])
             
@@ -453,14 +466,17 @@ def run():
         print("📊 최종 결과")
         print("="*50)
         
+        # 실제 처리된 시트 수 계산 (스킵된 것 제외)
+        total_sheets = len([item for item in ITEMS if "여기에" not in item['url']]) + 1  # +1은 Sheet6(투자)
+        
         if failed_items:
             print(f"❌ 실패한 시트 ({len(failed_items)}개): {', '.join(failed_items)}")
-            print(f"✅ 성공한 시트: {6 - len(failed_items)}개")
+            print(f"✅ 성공한 시트: {total_sheets - len(failed_items)}개")
             print("="*50)
             print("⚠️ 일부 데이터 수집 실패 - 워크플로우 실패로 종료")
             sys.exit(1)  # GitHub Actions가 실패로 인식
         else:
-            print("✅ 모든 시트 (6개) 데이터 수집 성공!")
+            print(f"✅ 모든 시트 ({total_sheets}개) 데이터 수집 성공!")
             print("="*50)
             sys.exit(0)  # 정상 종료
         
