@@ -59,6 +59,12 @@ MAX_RETRIES = 3
 MAX_CHART_RETRIES = 3
 # ==========================================
 
+def clean_text(text):
+    """숫자만 추출하고, 빈 값이면 '0' 반환"""
+    text = text.replace("'", "").replace("<<", "").replace(",", "")
+    cleaned = re.sub(r'[^0-9]', '', text).strip()
+    return cleaned if cleaned else "0"
+
 def get_dnf_data(target_url, max_retries=MAX_RETRIES):
     """
     사이트에 접속해서 '실제 거래된 가격' 표의 숫자만 쏙 뽑아오는 함수
@@ -86,38 +92,57 @@ def get_dnf_data(target_url, max_retries=MAX_RETRIES):
             
             # 1. '24시간내'라는 글자가 있는 줄 찾기
             row_24_xpath = "//td[contains(text(), '24시간내')]/parent::tr"
-            wait.until(EC.presence_of_element_located((By.XPATH, row_24_xpath)))
+            row_24_elem = wait.until(EC.presence_of_element_located((By.XPATH, row_24_xpath)))
+            print("✅ 24시간 행 발견")
             
-            # 2. '72시간내'도 로딩될 때까지 명시적 대기 (고정 sleep 대신)
+            # 2. '72시간내'도 로딩될 때까지 명시적 대기
             row_72_xpath = "//td[contains(text(), '72시간내')]/parent::tr"
-            wait.until(EC.presence_of_element_located((By.XPATH, row_72_xpath)))
+            row_72_elem = wait.until(EC.presence_of_element_located((By.XPATH, row_72_xpath)))
+            print("✅ 72시간 행 발견")
             
-            # 추가 안정화 대기 (필요시)
-            time.sleep(2)
+            # 텍스트 콘텐츠가 완전히 로드될 때까지 추가 대기
+            time.sleep(3)
 
-            # 텍스트 청소기 함수
-            def clean_text(text):
-                text = text.replace("'", "").replace("<<", "").replace(",", "")
-                return re.sub(r'[^0-9]', '', text).strip()
-
-            # 3. 24시간 데이터 추출
-            row_24_elem = driver.find_element(By.XPATH, row_24_xpath)
+            # 3. 데이터 추출 및 검증
             cols_24 = row_24_elem.find_elements(By.TAG_NAME, "td")
-            data_24 = [clean_text(cols_24[i].text) for i in range(1, 4)]
-
-            # 4. 72시간 데이터 추출
-            row_72_elem = driver.find_element(By.XPATH, row_72_xpath)
             cols_72 = row_72_elem.find_elements(By.TAG_NAME, "td")
-            data_72 = [clean_text(cols_72[i].text) for i in range(1, 4)]
+            
+            print(f"📊 24시간 컬럼 수: {len(cols_24)}, 72시간 컬럼 수: {len(cols_72)}")
+            
+            if len(cols_24) < 4 or len(cols_72) < 4:
+                raise ValueError(f"컬럼 수 부족: 24h={len(cols_24)}, 72h={len(cols_72)}")
+            
+            # 원본 텍스트 출력 (디버깅용)
+            raw_24 = [cols_24[i].text for i in range(1, 4)]
+            raw_72 = [cols_72[i].text for i in range(1, 4)]
+            print(f"📝 24시간 원본: {raw_24}")
+            print(f"📝 72시간 원본: {raw_72}")
+            
+            data_24 = [clean_text(t) for t in raw_24]
+            data_72 = [clean_text(t) for t in raw_72]
             
             result = data_24 + data_72
+            
+            # 유효성 검증 - 모든 값이 '0'이면 실패
+            if all(x == '0' for x in result):
+                raise ValueError("⚠️ 모든 데이터가 0 또는 비어있음")
+            
             print(f"✅ 데이터 수집 성공: {result}")
             return result
 
         except Exception as e:
             print(f"⚠️ [{attempt+1}/{max_retries}] 수집 실패: {e}")
+            
+            # 디버깅: 페이지 소스 일부 출력
+            if driver:
+                try:
+                    page_source_preview = driver.page_source[:500]
+                    print(f"📄 페이지 미리보기: {page_source_preview}...")
+                except:
+                    pass
+            
             if attempt < max_retries - 1:
-                wait_time = 5 * (attempt + 1)  # 5, 10, 15초 대기
+                wait_time = 5 * (attempt + 1)
                 print(f"   {wait_time}초 후 재시도...")
                 time.sleep(wait_time)
             else:
@@ -368,7 +393,8 @@ def run():
         doc = client.open_by_url(SHEET_URL)
         print(f"✅ 구글 시트 연결 성공: {doc.title}")
 
-        print("\\n" + "="*50)
+        print()
+        print("="*50)
         print("📦 아이템 데이터 수집 시작 (Sheet1~Sheet5)")
         print("="*50)
         
@@ -376,7 +402,8 @@ def run():
             if "여기에" in item['url']:
                 continue
 
-            print(f"\\n--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
+            print()
+            print(f"--- [{i+1}/5] {item['sheet_name']} 작업 중 ---")
             
             result_data = get_dnf_data(item['url'])
             
@@ -410,7 +437,8 @@ def run():
             
             time.sleep(5)
 
-        print("\\n" + "="*50)
+        print()
+        print("="*50)
         print("💰 투자 페이지 구매가격 수집 (Sheet6)")
         print("="*50)
         
@@ -425,7 +453,8 @@ def run():
             print("❌ Sheet6: 구매가격 수집/저장 실패")
             failed_items.append('Sheet6')
         
-        print("\\n" + "="*50)
+        print()
+        print("="*50)
         print("📊 최종 결과")
         print("="*50)
         
@@ -441,7 +470,8 @@ def run():
             sys.exit(0)  # 정상 종료
         
     except Exception as e:
-        print(f"\\n❌ 프로그램 실행 중 치명적 오류 발생: {e}")
+        print()
+        print(f"❌ 프로그램 실행 중 치명적 오류 발생: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)  # 실패로 종료
