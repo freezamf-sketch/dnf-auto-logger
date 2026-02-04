@@ -13,7 +13,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.errors import HttpError
 from pyvirtualdisplay import Display
 import math
 
@@ -310,21 +309,17 @@ def update_sheet_with_retry(worksheet, cell_range, values, max_retries=3):
         try:
             worksheet.update(range_name=cell_range, values=values)
             return True
-        except HttpError as e:
-            if e.resp.status in [429, 500, 503]:  # Rate limit or server error
+        except Exception as e:
+            # gspread의 APIError 처리
+            error_msg = str(e)
+            if 'RATE_LIMIT_EXCEEDED' in error_msg or '429' in error_msg or '500' in error_msg or '503' in error_msg:
                 wait_time = 2 ** attempt  # 1, 2, 4초 exponential backoff
-                print(f"⚠️ API 에러 [{attempt+1}/{max_retries}]: {e.resp.status}")
+                print(f"⚠️ API 에러 [{attempt+1}/{max_retries}]: {error_msg[:100]}")
                 if attempt < max_retries - 1:
                     print(f"   {wait_time}초 후 재시도...")
                     time.sleep(wait_time)
             else:
-                print(f"❌ HTTP 에러 (재시도 불가): {e}")
-                raise
-        except Exception as e:
-            print(f"⚠️ 예상치 못한 에러 [{attempt+1}/{max_retries}]: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(2)
-            else:
+                print(f"❌ 에러 (재시도 불가): {e}")
                 raise
     
     return False
