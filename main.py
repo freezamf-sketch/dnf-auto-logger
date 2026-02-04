@@ -54,6 +54,10 @@ ITEMS = [
     {
         "http://dnfnow.xyz/item?item_idx=51f381d45d16ef4273ae25f01f7ea4c2", 
         "sheet_name": "Sheet9"
+    },
+    {
+        "url": "여기에_새_URL_입력", 
+        "sheet_name": "Sheet10"
     }
 ]
 
@@ -497,3 +501,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
