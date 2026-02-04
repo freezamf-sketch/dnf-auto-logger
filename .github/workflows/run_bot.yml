@@ -2,8 +2,8 @@ name: DNF Crawler
 
 on:
   schedule:
-    - cron: '0 0,12 * * *'
-  workflow_dispatch:
+    - cron: '0 10 * * *'  # 매일 오후 7시 (KST) = UTC 10:00
+  workflow_dispatch:  # 수동 실행도 가능
 
 jobs:
   build:
