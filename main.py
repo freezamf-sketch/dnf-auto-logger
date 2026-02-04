@@ -45,21 +45,18 @@ ITEMS = [
         "sheet_name": "Sheet5"
     },
     {
-        "url": "http://dnfnow.xyz/item?item_idx=4e5c23c6083931685b79d8b542eeb268", 
+        "url": "PLACEHOLDER_URL_7", 
         "sheet_name": "Sheet7"
     },
     {
-        "url": "http://dnfnow.xyz/item?item_idx=028f60ed1253313f5bbd99f228461f33", 
+        "url": "PLACEHOLDER_URL_8", 
         "sheet_name": "Sheet8"
     },
     {
-        "url": "http://dnfnow.xyz/item?item_idx=51f381d45d16ef4273ae25f01f7ea4c2", 
+        "url": "PLACEHOLDER_URL_9", 
         "sheet_name": "Sheet9"
-    },
-    {
-        "url": "PLACEHOLDER_URL_10", 
-        "sheet_name": "Sheet10"
     }
+    # Sheet10 항목 삭제됨
 ]
 
 # 투자 페이지 URL (Sheet6에 저장) - 그대로 유지!
