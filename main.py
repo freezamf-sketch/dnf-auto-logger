@@ -45,15 +45,15 @@ ITEMS = [
         "sheet_name": "Sheet5"
     },
     {
-        "url": "PLACEHOLDER_URL_7", 
+        "http://dnfnow.xyz/item?item_idx=4e5c23c6083931685b79d8b542eeb268", 
         "sheet_name": "Sheet7"
     },
     {
-        "url": "PLACEHOLDER_URL_8", 
+        "url": "http://dnfnow.xyz/item?item_idx=028f60ed1253313f5bbd99f228461f33", 
         "sheet_name": "Sheet8"
     },
     {
-        "url": "PLACEHOLDER_URL_9", 
+        "url": "http://dnfnow.xyz/item?item_idx=51f381d45d16ef4273ae25f01f7ea4c2", 
         "sheet_name": "Sheet9"
     }
     # Sheet10 항목 삭제됨
