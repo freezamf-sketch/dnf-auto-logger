@@ -45,7 +45,7 @@ ITEMS = [
         "sheet_name": "Sheet5"
     },
     {
-        "http://dnfnow.xyz/item?item_idx=4e5c23c6083931685b79d8b542eeb268", 
+        "url": "http://dnfnow.xyz/item?item_idx=4e5c23c6083931685b79d8b542eeb268", 
         "sheet_name": "Sheet7"
     },
     {
