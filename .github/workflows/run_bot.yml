@@ -17,18 +17,17 @@ jobs:
       with:
         python-version: '3.9'
 
-    # [중요] 시스템 패키지 설치 (크롬, xvfb)
     - name: Install System Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable xvfb
 
-    # [중요] 파이썬 패키지 설치 (pyvirtualdisplay 추가)
     - name: Install Python Dependencies
       run: |
-        pip install selenium gspread google-auth pyvirtualdisplay webdriver-manager
+        pip install selenium gspread google-auth pyvirtualdisplay webdriver-manager requests beautifulsoup4
 
     - name: Run script
       env:
         GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
       run: python main.py
+
