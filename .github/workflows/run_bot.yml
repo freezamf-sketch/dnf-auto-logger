@@ -26,8 +26,9 @@ jobs:
       run: |
         pip install selenium gspread google-auth pyvirtualdisplay webdriver-manager requests beautifulsoup4
 
-    - name: Run script
+       - name: Run script
       env:
         GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
-      run: python main.py
-
+      run: |
+        python -c "import requests; from bs4 import BeautifulSoup; print('✅ 패키지 확인 완료')"
+        python main.py
