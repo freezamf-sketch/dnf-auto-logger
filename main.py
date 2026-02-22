@@ -5,19 +5,17 @@ import re
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import requests
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import requests
-from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 from pyvirtualdisplay import Display
 
-# ==========================================
-# 📋 [사용자 설정 영역]
 # ==========================================
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1lKwU5aY6WGywhPRN1uIbCNjX8wQ7hcUNcGstgvoBeFI/edit"
 
@@ -47,11 +45,8 @@ def clean_text(text):
     return cleaned if cleaned else "0"
 
 
+# ✅ Selenium 완전 제거 - requests만 사용
 def get_dnf_data(target_url, max_retries=MAX_RETRIES):
-    """
-    requests + BeautifulSoup으로 데이터 수집
-    실패 시 API 엔드포인트 시도
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "ko-KR,ko;q=0.9",
@@ -94,7 +89,7 @@ def get_dnf_data(target_url, max_retries=MAX_RETRIES):
                 else:
                     print(f"⚠️ API 응답 코드: {api_resp.status_code}")
 
-                raise ValueError("테이블 행을 찾을 수 없음 (JS 렌더링 필요 가능성)")
+                raise ValueError("테이블 행을 찾을 수 없음")
 
             cols_24 = row_24.find_all('td')
             cols_72 = row_72.find_all('td')
@@ -253,7 +248,7 @@ def get_today_buy_price_from_chart(max_retries=MAX_CHART_RETRIES):
                 print(f"   10초 후 재시도...")
                 time.sleep(10)
             else:
-                print(f"❌ 최종 실패: 모든 방법 실패")
+                print(f"❌ 최종 실패")
                 return None
 
         except Exception as e:
