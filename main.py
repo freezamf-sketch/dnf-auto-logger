@@ -7,14 +7,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import requests
+from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 from pyvirtualdisplay import Display
-import math
 
 # ==========================================
 # 📋 [사용자 설정 영역]
@@ -41,35 +41,6 @@ MAX_CHART_RETRIES = 3
 # ==========================================
 
 
-def create_driver():
-    """
-    ✅ 수정: driver 생성 함수 분리 - 매번 새 인스턴스 생성 보장
-    """
-    chrome_options = Options()
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-background-networking")  # ✅ 추가: 불필요한 네트워크 차단
-    chrome_options.add_argument("--memory-pressure-off")            # ✅ 추가: 메모리 압박 방지
-    driver = webdriver.Chrome(options=chrome_options)
-    driver.set_page_load_timeout(40)  # ✅ 수정: 30→40초로 여유 확보
-    return driver
-
-
-def quit_driver(driver):
-    """
-    ✅ 수정: driver 종료 함수 분리 - 항상 안전하게 종료
-    """
-    if driver:
-        try:
-            driver.quit()
-        except Exception as e:
-            print(f"⚠️ 드라이버 종료 실패 (무시): {e}")
-
-
 def clean_text(text):
     text = text.replace("'", "").replace("<<", "").replace(",", "")
     cleaned = re.sub(r'[^0-9]', '', text).strip()
@@ -78,49 +49,63 @@ def clean_text(text):
 
 def get_dnf_data(target_url, max_retries=MAX_RETRIES):
     """
-    ✅ 수정: 매 시도마다 driver를 새로 생성/종료 + body 실제 로딩 검증 추가
+    requests + BeautifulSoup으로 데이터 수집
+    실패 시 API 엔드포인트 시도
     """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
     for attempt in range(max_retries):
-        driver = None
         try:
             print(f"🔄 [{attempt+1}/{max_retries}] 접속 시도: {target_url}")
 
-            driver = create_driver()
-            driver.get(target_url)
+            response = requests.get(target_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            response.encoding = 'utf-8'
 
-            wait = WebDriverWait(driver, 35)
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-            # ✅ 수정: body가 실제로 채워졌는지 먼저 검증 (빈 body 크래시 방지)
-            wait.until(lambda d: d.execute_script(
-                "return document.body && document.body.innerHTML.length > 300"
-            ))
-            print("✅ 페이지 body 로딩 확인")
+            row_24 = None
+            row_72 = None
 
-            # ✅ 추가: JS 렌더링 완료 대기 (테이블이 동적 생성되는 경우 대비)
-            wait.until(lambda d: d.execute_script(
-                "return document.readyState"
-            ) == "complete")
+            for td in soup.find_all('td'):
+                if '24시간내' in td.get_text():
+                    row_24 = td.find_parent('tr')
+                if '72시간내' in td.get_text():
+                    row_72 = td.find_parent('tr')
 
-            row_24_xpath = "//td[contains(text(), '24시간내')]/parent::tr"
-            row_24_elem = wait.until(EC.presence_of_element_located((By.XPATH, row_24_xpath)))
-            print("✅ 24시간 행 발견")
+            if not row_24 or not row_72:
+                print(f"⚠️ [{attempt+1}/{max_retries}] HTML 테이블 없음 → API 시도")
 
-            row_72_xpath = "//td[contains(text(), '72시간내')]/parent::tr"
-            row_72_elem = wait.until(EC.presence_of_element_located((By.XPATH, row_72_xpath)))
-            print("✅ 72시간 행 발견")
+                item_idx = target_url.split("item_idx=")[-1]
+                api_url = f"http://dnfnow.xyz/api/item?item_idx={item_idx}"
+                api_resp = requests.get(api_url, headers=headers, timeout=30)
 
-            time.sleep(2)  # ✅ 수정: 3초→2초 (body 검증으로 이미 충분)
+                if api_resp.status_code == 200:
+                    try:
+                        data = api_resp.json()
+                        print(f"📦 API 전체 응답: {json.dumps(data, ensure_ascii=False)[:500]}")
+                    except Exception as je:
+                        print(f"⚠️ API JSON 파싱 실패: {je}")
+                        print(f"📄 API 응답 텍스트: {api_resp.text[:300]}")
+                else:
+                    print(f"⚠️ API 응답 코드: {api_resp.status_code}")
 
-            cols_24 = row_24_elem.find_elements(By.TAG_NAME, "td")
-            cols_72 = row_72_elem.find_elements(By.TAG_NAME, "td")
+                raise ValueError("테이블 행을 찾을 수 없음 (JS 렌더링 필요 가능성)")
+
+            cols_24 = row_24.find_all('td')
+            cols_72 = row_72.find_all('td')
 
             print(f"📊 24시간 컬럼 수: {len(cols_24)}, 72시간 컬럼 수: {len(cols_72)}")
 
             if len(cols_24) < 4 or len(cols_72) < 4:
                 raise ValueError(f"컬럼 수 부족: 24h={len(cols_24)}, 72h={len(cols_72)}")
 
-            raw_24 = [cols_24[i].text for i in range(1, 4)]
-            raw_72 = [cols_72[i].text for i in range(1, 4)]
+            raw_24 = [cols_24[i].get_text(strip=True) for i in range(1, 4)]
+            raw_72 = [cols_72[i].get_text(strip=True) for i in range(1, 4)]
             print(f"📝 24시간 원본: {raw_24}")
             print(f"📝 72시간 원본: {raw_72}")
 
@@ -129,23 +114,15 @@ def get_dnf_data(target_url, max_retries=MAX_RETRIES):
             result = data_24 + data_72
 
             if all(x == '0' for x in result):
-                raise ValueError("⚠️ 모든 데이터가 0 또는 비어있음")
+                raise ValueError("모든 데이터가 0 또는 비어있음")
 
             print(f"✅ 데이터 수집 성공: {result}")
             return result
 
         except Exception as e:
             print(f"⚠️ [{attempt+1}/{max_retries}] 수집 실패: {e}")
-
-            if driver:
-                try:
-                    page_source_preview = driver.page_source[:500]
-                    print(f"📄 페이지 미리보기: {page_source_preview}...")
-                except:
-                    pass
-
             if attempt < max_retries - 1:
-                wait_time = 10 * (attempt + 1)  # ✅ 수정: 5→10초 간격으로 늘림
+                wait_time = 10 * (attempt + 1)
                 print(f"   {wait_time}초 후 재시도...")
                 time.sleep(wait_time)
             else:
@@ -154,14 +131,31 @@ def get_dnf_data(target_url, max_retries=MAX_RETRIES):
                 traceback.print_exc()
                 return None
 
-        finally:
-            quit_driver(driver)  # ✅ 수정: 항상 driver 종료 (성공/실패 무관)
+
+def create_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-background-networking")
+    chrome_options.add_argument("--memory-pressure-off")
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.set_page_load_timeout(40)
+    return driver
+
+
+def quit_driver(driver):
+    if driver:
+        try:
+            driver.quit()
+        except Exception as e:
+            print(f"⚠️ 드라이버 종료 실패 (무시): {e}")
 
 
 def get_today_buy_price_from_chart(max_retries=MAX_CHART_RETRIES):
-    """
-    ✅ 수정: driver 생성/종료 분리 적용
-    """
     for attempt in range(max_retries):
         driver = None
         try:
@@ -171,8 +165,6 @@ def get_today_buy_price_from_chart(max_retries=MAX_CHART_RETRIES):
             driver.get(INVEST_URL)
 
             wait = WebDriverWait(driver, 35)
-
-            # ✅ 수정: body 실제 로딩 검증
             wait.until(lambda d: d.execute_script(
                 "return document.body && document.body.innerHTML.length > 300"
             ))
@@ -274,7 +266,7 @@ def get_today_buy_price_from_chart(max_retries=MAX_CHART_RETRIES):
                 return None
 
         finally:
-            quit_driver(driver)  # ✅ 수정: 항상 driver 종료
+            quit_driver(driver)
 
 
 def update_sheet_with_retry(worksheet, cell_range, values, max_retries=3):
@@ -354,16 +346,16 @@ def run():
 
         print()
         print("="*50)
-        print("📦 아이템 데이터 수집 시작 (9개 아이템)")
+        print("📦 아이템 데이터 수집 시작")
         print("="*50)
 
         for i, item in enumerate(ITEMS):
             if "여기에" in item['url']:
-                print(f"⏭️  [{i+1}/9] {item['sheet_name']} 스킵 (URL 미설정)")
+                print(f"⏭️  [{i+1}/{len(ITEMS)}] {item['sheet_name']} 스킵 (URL 미설정)")
                 continue
 
             print()
-            print(f"--- [{i+1}/9] {item['sheet_name']} 작업 중 ---")
+            print(f"--- [{i+1}/{len(ITEMS)}] {item['sheet_name']} 작업 중 ---")
 
             result_data = get_dnf_data(item['url'])
 
@@ -393,8 +385,7 @@ def run():
                 print(f"❌ {item['sheet_name']} 데이터 수집 실패")
                 failed_items.append(item['sheet_name'])
 
-            # ✅ 수정: 시트 간 대기를 5→8초로 늘려 서버 부하 분산
-            time.sleep(8)
+            time.sleep(3)
 
         print()
         print("="*50)
