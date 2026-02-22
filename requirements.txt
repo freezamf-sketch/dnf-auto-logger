@@ -1,0 +1,6 @@
+selenium
+gspread
+google-auth
+pyvirtualdisplay
+requests
+beautifulsoup4
