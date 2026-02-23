@@ -2,9 +2,9 @@ name: DNF Crawler
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # 매일 KST 09:00 (UTC 00:00)
-    - cron: '0 12 * * *'  # 매일 KST 21:00 (UTC 12:00)
-  workflow_dispatch:       # 수동 실행
+    - cron: '0 0 * * *'   # KST 09:00
+    - cron: '0 12 * * *'  # KST 21:00
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,13 +18,15 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Install Chrome
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+
     - name: Install Python Dependencies
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-        python -c "from bs4 import BeautifulSoup; print('✅ bs4 확인')"
-        python -c "import requests; print('✅ requests 확인')"
-        python -c "import gspread; print('✅ gspread 확인')"
 
     - name: Run script
       env:
