@@ -2,36 +2,31 @@ name: DNF Crawler
 
 on:
   schedule:
-    - cron: '0 10 * * *'  # 매일 오후 7시 (KST) = UTC 10:00
-  workflow_dispatch:  # 수동 실행도 가능
+    - cron: '0 0 * * *'   # 매일 KST 09:00 (UTC 00:00)
+    - cron: '0 12 * * *'  # 매일 KST 21:00 (UTC 12:00)
+  workflow_dispatch:       # 수동 실행
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
-
-    - name: Install System Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable xvfb
+        python-version: '3.11'
 
     - name: Install Python Dependencies
       run: |
         pip install --upgrade pip
-        pip install selenium gspread google-auth pyvirtualdisplay webdriver-manager requests beautifulsoup4
-        python -c "from bs4 import BeautifulSoup; print('✅ bs4 설치 확인 완료')"
-        python -c "import requests; print('✅ requests 설치 확인 완료')"
+        pip install -r requirements.txt
+        python -c "from bs4 import BeautifulSoup; print('✅ bs4 확인')"
+        python -c "import requests; print('✅ requests 확인')"
+        python -c "import gspread; print('✅ gspread 확인')"
 
     - name: Run script
       env:
         GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
-      run: |
-        python -c "import requests; from bs4 import BeautifulSoup; print('✅ 패키지 실행 전 최종 확인 완료')"
-        python main.py
+      run: python main.py
