@@ -24,8 +24,8 @@ ITEMS = [
     {"url": "http://dnfnow.xyz/item?item_idx=51f381d45d16ef4273ae25f01f7ea4c2",  "sheet_name": "Sheet9"},
 ]
 
-START_ROW  = 5
-START_COL  = 2
+START_ROW   = 5
+START_COL   = 2
 MAX_RETRIES = 3
 # ==========================================
 
@@ -45,6 +45,10 @@ def get_dnf_data(target_url: str, max_retries: int = MAX_RETRIES):
         "Accept-Encoding": "gzip, deflate",
     }
 
+    # ✅ 사이트 텍스트 변경 대응: 가능한 모든 패턴 등록
+    LABELS_24 = {'24시간내', '24시간'}
+    LABELS_72 = {'72시간내', '72시간'}
+
     for attempt in range(max_retries):
         try:
             print(f"🔄 [{attempt+1}/{max_retries}] 접속 시도: {target_url}")
@@ -61,9 +65,9 @@ def get_dnf_data(target_url: str, max_retries: int = MAX_RETRIES):
                 if not tds:
                     continue
                 first = tds[0].get_text(strip=True)
-                if first == '24시간내':
+                if first in LABELS_24:
                     row_24 = tr
-                elif first == '72시간내':
+                elif first in LABELS_72:
                     row_72 = tr
 
             if not row_24 or not row_72:
