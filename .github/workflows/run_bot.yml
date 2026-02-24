@@ -28,7 +28,12 @@ jobs:
         pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run script
+    - name: Run item_tracker (Sheet1~9)
       env:
         GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
-      run: python main.py
+      run: python item_tracker.py
+
+    - name: Run invest_tracker (Sheet6)
+      env:
+        GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
+      run: python invest_tracker.py
